@@ -76,18 +76,16 @@ def parsear_mares(html: str, ano: int, mes: int) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     tabela = soup.find(id="tabla_mareas")
     linhas = []
-    # Cada dia ocupa duas <tr>; só a primeira (com o atributo onclick) tem dados.
     for tr in tabela.select("tr.tabla_mareas_fila[onclick]"):
         dia = int(tr.select_one(".tabla_mareas_dia_numero").get_text(strip=True))
         classes_lua = tr.select_one("td.tabla_mareas_luna > span")["class"]
-        # classe "icon-hsN": N (0-29) é o ícone da fase da lua
         lua = next(int(c[7:]) for c in classes_lua if c.startswith("icon-hs"))
         coef = re.search(r"\d+", tr.select_one("td.tabla_mareas_coeficiente").get_text())
 
         for celula in tr.select("td.tabla_mareas_marea"):
             hora = celula.select_one(".tabla_mareas_marea_hora")
             altura = celula.select_one(".tabla_mareas_marea_altura_numero")
-            if hora is None or altura is None:  # dia com menos de 4 marés
+            if hora is None or altura is None:
                 continue
             alta = celula.select_one(".tabla_mareas_marea_pleamar") is not None
             linhas.append(
@@ -120,7 +118,6 @@ def parsear_previsao(html: str, ano: int) -> list[dict]:
     for ficha in soup.select("div.ficha"):
         dia = int(ficha.select_one(".f_circulo .dia").get_text(strip=True))
         mes = meses.index(ficha.select_one(".f_circulo .mes").get_text(strip=True).upper()) + 1
-        # a previsão cruza a virada do ano (ex.: DEZ -> JAN)
         if mes_anterior is not None and mes < mes_anterior:
             ano += 1
         mes_anterior = mes
@@ -148,7 +145,6 @@ def coletar_mares_do_ano(ano: int) -> pd.DataFrame:
     """
     linhas = []
     for mes in range(1, 13):
-        # o site devolve o mês do dia enviado no campo `fecha` do formulário
         html = baixar_html(URL_BASE, {"fecha": f"{ano}-{mes:02d}-01"})
         linhas += parsear_mares(html, ano, mes)
         time.sleep(PAUSA)
@@ -163,20 +159,16 @@ def main(ano: int = 2025) -> None:
         df.to_csv(DIR_RAW / nome, index=False)
         print(f"{nome}: {len(df)} linhas")
 
-    # 1. tábua de marés do ano inteiro
     salvar(coletar_mares_do_ano(ano), f"mares_{ano}.csv")
 
-    # 2. marés do mês corrente (GET sem formulário devolve o mês atual)
     html = baixar_html(URL_BASE)
     salvar(pd.DataFrame(parsear_mares(html, hoje.year, hoje.month)), "mares_previsao.csv")
     time.sleep(PAUSA)
 
-    # 3. previsão de ondas
     html = baixar_html(URL_ONDAS)
     salvar(pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "altura_onda_m"}), "ondas.csv")
     time.sleep(PAUSA)
 
-    # 4. previsão de vento
     html = baixar_html(URL_VENTO)
     salvar(pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "vento_kmh"}), "vento.csv")
 
