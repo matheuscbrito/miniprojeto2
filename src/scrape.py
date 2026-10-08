@@ -78,24 +78,22 @@ def parsear_mares(html: str, ano: int, mes: int) -> list[dict]:
     linhas = []
     for tr in tabela.select("tr.tabla_mareas_fila[onclick]"):
         dia = int(tr.select_one(".tabla_mareas_dia_numero").get_text(strip=True))
-        classes_lua = tr.select_one("td.tabla_mareas_luna > span")["class"]
-        lua = next(int(c[7:]) for c in classes_lua if c.startswith("icon-hs"))
-        coef = re.search(r"\d+", tr.select_one("td.tabla_mareas_coeficiente").get_text())
-
+        coeficiente = int(re.search(r"\d+", tr.select_one("td.tabla_mareas_coeficiente").get_text()).group())
         for celula in tr.select("td.tabla_mareas_marea"):
             hora = celula.select_one(".tabla_mareas_marea_hora")
-            altura = celula.select_one(".tabla_mareas_marea_altura_numero")
-            if hora is None or altura is None:
+            if hora is None:
                 continue
-            alta = celula.select_one(".tabla_mareas_marea_pleamar") is not None
+            altura = celula.select_one(".tabla_mareas_marea_altura_numero").get_text(strip=True)
+            tipo = "baixa"
+            if celula.select_one(".tabla_mareas_marea_pleamar"):
+                tipo = "alta"
             linhas.append(
                 {
-                    "data": f"{ano:04d}-{mes:02d}-{dia:02d}",
+                    "data": f"{ano}-{mes:02d}-{dia:02d}",
                     "hora": hora.get_text(strip=True),
-                    "altura_m": float(altura.get_text(strip=True).replace(",", ".")),
-                    "tipo": "alta" if alta else "baixa",
-                    "coeficiente": int(coef.group()) if coef else None,
-                    "fase_lua": lua,
+                    "altura_m": float(altura.replace(",", ".")),
+                    "tipo": tipo,
+                    "coeficiente": coeficiente,
                 }
             )
     return linhas
@@ -110,25 +108,23 @@ def parsear_previsao(html: str, ano: int) -> list[dict]:
     TODO: percorrer os blocos de dia e, dentro deles, as linhas de hora.
     Atenção à data: o bloco mostra dia e mês abreviado, sem o ano.
     """
-    meses = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
-             "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
+    meses = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
     soup = BeautifulSoup(html, "html.parser")
     linhas = []
-    mes_anterior = None
+    mes_anterior = 0
     for ficha in soup.select("div.ficha"):
         dia = int(ficha.select_one(".f_circulo .dia").get_text(strip=True))
-        mes = meses.index(ficha.select_one(".f_circulo .mes").get_text(strip=True).upper()) + 1
-        if mes_anterior is not None and mes < mes_anterior:
+        mes = meses.index(ficha.select_one(".f_circulo .mes").get_text(strip=True)) + 1
+        if mes < mes_anterior:
             ano += 1
         mes_anterior = mes
-
         for bloco in ficha.select("div.f_temp_horas"):
             hora, direcao = [d.get_text(strip=True) for d in bloco.select("div.f_temp_hora")]
-            valor = bloco.select_one(".grafico_temp_barra_relleno").get_text(" ", strip=True)
-            numero = re.search(r"\d+(?:,\d+)?", valor).group()
+            valor = bloco.select_one(".grafico_temp_barra_relleno").get_text(strip=True)
+            numero = re.search(r"\d+(,\d+)?", valor).group()
             linhas.append(
                 {
-                    "data": f"{ano:04d}-{mes:02d}-{dia:02d}",
+                    "data": f"{ano}-{mes:02d}-{dia:02d}",
                     "hora": hora,
                     "valor": float(numero.replace(",", ".")),
                     "direcao": direcao,
@@ -155,22 +151,26 @@ def main(ano: int = 2025) -> None:
     DIR_RAW.mkdir(parents=True, exist_ok=True)
     hoje = datetime.now()
 
-    def salvar(df: pd.DataFrame, nome: str) -> None:
-        df.to_csv(DIR_RAW / nome, index=False)
-        print(f"{nome}: {len(df)} linhas")
-
-    salvar(coletar_mares_do_ano(ano), f"mares_{ano}.csv")
+    mares = coletar_mares_do_ano(ano)
+    mares.to_csv(DIR_RAW / f"mares_{ano}.csv", index=False)
+    print(f"mares_{ano}.csv: {len(mares)} linhas")
 
     html = baixar_html(URL_BASE)
-    salvar(pd.DataFrame(parsear_mares(html, hoje.year, hoje.month)), "mares_previsao.csv")
+    mares_previsao = pd.DataFrame(parsear_mares(html, hoje.year, hoje.month))
+    mares_previsao.to_csv(DIR_RAW / "mares_previsao.csv", index=False)
+    print(f"mares_previsao.csv: {len(mares_previsao)} linhas")
     time.sleep(PAUSA)
 
     html = baixar_html(URL_ONDAS)
-    salvar(pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "altura_onda_m"}), "ondas.csv")
+    ondas = pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "altura_onda_m"})
+    ondas.to_csv(DIR_RAW / "ondas.csv", index=False)
+    print(f"ondas.csv: {len(ondas)} linhas")
     time.sleep(PAUSA)
 
     html = baixar_html(URL_VENTO)
-    salvar(pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "vento_kmh"}), "vento.csv")
+    vento = pd.DataFrame(parsear_previsao(html, hoje.year)).rename(columns={"valor": "vento_kmh"})
+    vento.to_csv(DIR_RAW / "vento.csv", index=False)
+    print(f"vento.csv: {len(vento)} linhas")
 
 
 if __name__ == "__main__":
